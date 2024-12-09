@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Minha primeira página</title>
+    <link rel="stylesheet"
+          href="{{url_for('static', filename='css/style.css')}}">
+</head>
+<body>
+    <div class="maior">
+        <h1>Sistema Web para cadastrar alunos</h1>
+        <hr>
+        <h3>P4 BCC</h3>
+        <br>
+    </div>
+    <div class="caixalogin">
+        <form action="/fazer_login" method="post">
+            <label>Login</label>
+            <input type="text" id="login" name="login">
+            <br>
+            <label>Senha</label>
+            <input type="password" id="senha" name="senha">
+            <br>
+            <button id="botaoenviar" type="" onclick="verificar()">Enviar</button>
+            <p id="mensagem">{{texto}}</p>
+        </form>
+    </div>
+    <script src="{{url_for('static', filename='js/script.js')}}"></script>
+
+</body>
+</html>
