@@ -2,7 +2,6 @@ from flask import *
 import dao
 import atualizar as atual
 import dataanalise
-import os
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from datetime import timedelta
 from flask import session
@@ -13,6 +12,7 @@ from flask_sqlalchemy import SQLAlchemy
 import pandas as pd
 import plotly.express as px
 from flask import render_template
+from flask import wraps
 
 
 app = Flask(__name__)
@@ -21,21 +21,19 @@ app.secret_key = 'xcsdKJAH_Sd56$'
 #blueprints
 from rotas.usuarios import  usuarios_bp
 from rotas.produtos import  produtos_bp
-
 app.register_blueprint(usuarios_bp, url_prefix="/usuariosx")
 app.register_blueprint(produtos_bp, url_prefix="/produtosx")
 
+#JWT Config
 app.config["JWT_SECRET_KEY"] = 'xcsdKJAH_Sd56$'
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(seconds=20)
 jwt = JWTManager(app)
 
-
+#configurações de upload
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
 arquivo_csv = 'vendas_grande.csv'
 db = SQLAlchemy()
-
 
 @app.route('/upload', methods=['GET','POST'])
 def uploadArquivo():
@@ -56,7 +54,6 @@ def uploadArquivo():
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], nomeArquivo))
         return f'deu certo: arquivo {nomeArquivo} salvo com sucesso', 200
 
-
 @app.route('/')
 def home():
 
@@ -64,10 +61,9 @@ def home():
 
 @app.route('/logout', methods=['POST'])
 def logout():
-    session.pop('loginUser', None)  # Remove o loginUser da sessão
+    session.pop('loginUser', None)
     session.pop('tipoUser', None)
     return jsonify({"message": "Logout bem-sucedido!"}), 200
-
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -79,24 +75,32 @@ def login():
         return jsonify({"message": "Login bem-sucedido!"}), 200
     return jsonify({"message": "Credenciais inválidas"}), 401
 
-
-def verificar_login():
-    if 'loginUser' not in session:
-        return jsonify({"message": "Usuário não autenticado"}), 401
-    return None
+# Decorador para verificar login e tipo de usuário
+def login_required(user_type=None):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if 'loginUser' not in session:
+                return jsonify({"message": "Usuário não autenticado"}), 401
+            if user_type and session['tipoUser'] != user_type:
+                return jsonify({"message": "Permissão negada"}), 403
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 @app.route('/produtos', methods=['POST'])
+@login_required()
 def inserir_produto():
-    auth_check = verificar_login()
-    if auth_check:
-        return auth_check  # Se não estiver logado, retorna erro de não autenticado
-
     data = request.get_json()
+    if session['tipoUser'] == 'normal':
+        produtos_usuario = Produto.query.filter_by(loginUser=session['loginUser']).count()
+        if produtos_usuario >= 3:
+            return jsonify({"message": "Usuário normal só pode cadastrar até 3 produtos"}), 403
+
     produto = Produto(nome=data['nome'], loginUser=session['loginUser'], qtde=data['qtde'], preco=data['preco'])
     db.session.add(produto)
     db.session.commit()
     return jsonify({"message": "Produto inserido com sucesso!"}), 201
-
 
 @app.route('/atualizardados', methods=['POST'])
 def atualizar():
@@ -108,14 +112,12 @@ def atualizaruser():
     pessoas = {'nome':'rene'}
     return jsonify(pessoas)
 
-
 @app.route('/exibirgraficoprodutos')
 def exibirgrafProds():
     caminho_arquivo = os.path.join(UPLOAD_FOLDER, arquivo_csv)
 
     fig = dataanalise.gerarGrafProdutos(caminho_arquivo)
     return render_template('grafprodutos.html', plot=fig.to_html())
-
 
 @app.route('/exibirpagCadastro')
 def exibirPagCadastro():
@@ -127,63 +129,25 @@ def exibirPagCadastro():
         return render_template('index2.html', msg='Login necessário')
 
 @app.route('/produtos', methods=['GET'])
+@login_required()
 def listar_produtos():
-    # Verifica se o usuário está logado
-    auth_check = verificar_login()
-    if auth_check:
-        return auth_check  # Retorna erro se o usuário não estiver autenticado
-
-    # Consulta todos os produtos no banco de dados
     produtos = Produto.query.all()
-
-    # Formata os produtos em JSON
-    produtos_json = [
-        {
-            "id": produto.id,
-            "nome": produto.nome,
-            "loginUser": produto.loginUser,
-            "qtde": produto.qtde,
-            "preco": produto.preco,
-        }
-        for produto in produtos
-    ]
-
+    produtos_json = [{"id": p.id, "nome": p.nome, "loginUser": p.loginUser, "qtde": p.qtde, "preco": p.preco} for p in produtos]
     return jsonify(produtos_json), 200
 
 @app.route('/visualizacao', methods=['GET'])
+@login_required()
 def visualizar_vendas():
-    auth_check = verificar_login()
-    if auth_check:
-        return auth_check  # Retorna erro se o usuário não estiver autenticado
-
-    # Parâmetro opcional para filtro
     nome_produto = request.args.get('nomeProduto', None)
-
-    # Consulta dados do banco de dados
     query = db.session.query(Produto.nome, Produto.qtde, Produto.preco)
     if nome_produto:
         query = query.filter(Produto.nome.ilike(f"%{nome_produto}%"))
-
     vendas = query.all()
-
-    # Converte para DataFrame do pandas
     df = pd.DataFrame(vendas, columns=["Produto", "Quantidade", "Preço"])
     if df.empty:
         return "<h3>Nenhum dado encontrado para visualização.</h3>"
-
-    # Gera gráfico com Plotly
-    fig = px.bar(
-        df,
-        x="Produto",
-        y="Quantidade",
-        color="Preço",
-        title="Vendas por Produto"
-    )
-
-    # Renderiza o gráfico em HTML
+    fig = px.bar(df, x="Produto", y="Quantidade", color="Preço", title="Vendas por Produto")
     return render_template("grafico.html", grafico=fig.to_html(full_html=False))
-
-
 
 @app.route('/exibirPagComentario')
 def exibirPagComent():
@@ -218,7 +182,6 @@ def inserir_usuario():
 def get_todos():
     return jsonify(dao.listarpessoas(1)), 200
 
-#aqui eu usei uma forma possível mas não recomendada: mandei user e senha via post usando o HTTP (pode ser interceptado)
 @app.route('/listarusuarios/externo', methods=['POST'])
 def get_todos_externo():
     if not request.json:
@@ -231,7 +194,6 @@ def get_todos_externo():
         return jsonify(dao.listarpessoas(1)), 200
     else:
         return abort(401,'Usuário ou senha inválidos')
-
 
 @app.route('/obter/<string:login>', methods=['GET'])
 def get_usuario(login):
