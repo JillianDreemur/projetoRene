@@ -8,9 +8,9 @@ def conectardb():
         #user='p4bcc_user',
         #password='UZxYdHDJHcpAgxjp7hTtP033nhbqGWxo'
         host='localhost',
-        database='p4bcc',
+        database='bdMari',
         user='postgres',
-        password='12345'
+        password='123456'
     )
     return con
 

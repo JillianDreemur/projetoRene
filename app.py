@@ -1,7 +1,6 @@
 from flask import *
 import dao
 import atualizar as atual
-import dataanalise
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from datetime import timedelta
 from flask import session
@@ -12,7 +11,7 @@ from flask_sqlalchemy import SQLAlchemy
 import pandas as pd
 import plotly.express as px
 from flask import render_template
-from flask import wraps
+from functools import wraps
 
 
 app = Flask(__name__)
@@ -34,6 +33,26 @@ UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 arquivo_csv = 'vendas_grande.csv'
 db = SQLAlchemy()
+
+@app.route('/cadastrar_usuario', methods=['POST'])
+def cadastrar_usuario():
+    data = request.get_json()
+
+    # Verificar se os campos obrigatórios foram preenchidos
+    if not data.get('loginUser') or not data.get('senha') or not data.get('tipoUser'):
+        return jsonify({"message": "Dados inválidos"}), 400
+
+    # Verificar se o login já existe
+    usuario_existente = Usuario.query.filter_by(loginUser=data['loginUser']).first()
+    if usuario_existente:
+        return jsonify({"message": "Usuário já existe"}), 400
+
+    # Criar novo usuário
+    usuario = Usuario(loginUser=data['loginUser'], senha=data['senha'], tipoUser=data['tipoUser'])
+    db.session.add(usuario)
+    db.session.commit()
+
+    return jsonify({"message": "Usuário cadastrado com sucesso!"}), 201
 
 @app.route('/upload', methods=['GET','POST'])
 def uploadArquivo():
@@ -88,19 +107,50 @@ def login_required(user_type=None):
         return wrapper
     return decorator
 
-@app.route('/produtos', methods=['POST'])
+@app.route('/cadastrar_produto', methods=['POST'])
 @login_required()
-def inserir_produto():
+def cadastrar_produto():
     data = request.get_json()
+
+    if not data.get('nome') or not data.get('qtde') or not data.get('preco'):
+        return jsonify({"message": "Dados do produto inválidos"}), 400
+
+    # Verificar se o usuário normal já cadastrou 3 produtos
     if session['tipoUser'] == 'normal':
         produtos_usuario = Produto.query.filter_by(loginUser=session['loginUser']).count()
         if produtos_usuario >= 3:
             return jsonify({"message": "Usuário normal só pode cadastrar até 3 produtos"}), 403
 
+    # Criar o novo produto
     produto = Produto(nome=data['nome'], loginUser=session['loginUser'], qtde=data['qtde'], preco=data['preco'])
     db.session.add(produto)
     db.session.commit()
-    return jsonify({"message": "Produto inserido com sucesso!"}), 201
+
+    return jsonify({"message": "Produto cadastrado com sucesso!"}), 201
+
+@app.route('/buscar_produto', methods=['GET'])
+@login_required()
+def buscar_produto():
+    produto_id = request.args.get('id', None)
+    produto_nome = request.args.get('nome', None)
+
+    # Buscar por ID
+    if produto_id:
+        produto = Produto.query.get(produto_id)
+        if produto:
+            return jsonify({"id": produto.id, "nome": produto.nome, "loginUser": produto.loginUser, "qtde": produto.qtde, "preco": produto.preco}), 200
+        return jsonify({"message": "Produto não encontrado"}), 404
+
+    # Buscar por nome
+    if produto_nome:
+        produtos = Produto.query.filter(Produto.nome.ilike(f"%{produto_nome}%")).all()
+        if produtos:
+            produtos_json = [{"id": p.id, "nome": p.nome, "loginUser": p.loginUser, "qtde": p.qtde, "preco": p.preco} for p in produtos]
+            return jsonify(produtos_json), 200
+        return jsonify({"message": "Produto não encontrado"}), 404
+
+    return jsonify({"message": "Parâmetros inválidos"}), 400
+
 
 @app.route('/atualizardados', methods=['POST'])
 def atualizar():
@@ -112,12 +162,27 @@ def atualizaruser():
     pessoas = {'nome':'rene'}
     return jsonify(pessoas)
 
-@app.route('/exibirgraficoprodutos')
-def exibirgrafProds():
-    caminho_arquivo = os.path.join(UPLOAD_FOLDER, arquivo_csv)
+@app.route('/exibirgraficovendas')
+def exibir_grafico_vendas():
+    nome_produto = request.args.get('nomeProduto', None)
 
-    fig = dataanalise.gerarGrafProdutos(caminho_arquivo)
-    return render_template('grafprodutos.html', plot=fig.to_html())
+    # Obter dados do banco de dados
+    query = db.session.query(Produto.nome, Produto.qtde, Produto.preco)
+    if nome_produto:
+        query = query.filter(Produto.nome.ilike(f"%{nome_produto}%"))
+
+    vendas = query.all()
+
+    # Filtrando e pré-processando com pandas
+    df = pd.DataFrame(vendas, columns=["Produto", "Quantidade", "Preço"])
+
+    if df.empty:
+        return "<h3>Nenhum dado encontrado para visualização.</h3>"
+
+    # Gerar gráfico com plotly
+    fig = px.bar(df, x="Produto", y="Quantidade", color="Preço", title="Vendas por Produto")
+
+    return render_template("grafico.html", grafico=fig.to_html(full_html=False))
 
 @app.route('/exibirpagCadastro')
 def exibirPagCadastro():
@@ -128,26 +193,12 @@ def exibirPagCadastro():
 
         return render_template('index2.html', msg='Login necessário')
 
-@app.route('/produtos', methods=['GET'])
+@app.route('/listar_produtos', methods=['GET'])
 @login_required()
 def listar_produtos():
-    produtos = Produto.query.all()
+    produtos = Produto.query.all()  # Obtém todos os produtos cadastrados
     produtos_json = [{"id": p.id, "nome": p.nome, "loginUser": p.loginUser, "qtde": p.qtde, "preco": p.preco} for p in produtos]
     return jsonify(produtos_json), 200
-
-@app.route('/visualizacao', methods=['GET'])
-@login_required()
-def visualizar_vendas():
-    nome_produto = request.args.get('nomeProduto', None)
-    query = db.session.query(Produto.nome, Produto.qtde, Produto.preco)
-    if nome_produto:
-        query = query.filter(Produto.nome.ilike(f"%{nome_produto}%"))
-    vendas = query.all()
-    df = pd.DataFrame(vendas, columns=["Produto", "Quantidade", "Preço"])
-    if df.empty:
-        return "<h3>Nenhum dado encontrado para visualização.</h3>"
-    fig = px.bar(df, x="Produto", y="Quantidade", color="Preço", title="Vendas por Produto")
-    return render_template("grafico.html", grafico=fig.to_html(full_html=False))
 
 @app.route('/exibirPagComentario')
 def exibirPagComent():
