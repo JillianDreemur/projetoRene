@@ -5,6 +5,15 @@ import dataanalise
 import os
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from datetime import timedelta
+from flask import session
+import os
+from models import Produto as Produto
+from models import Usuario as Usuario
+from flask_sqlalchemy import SQLAlchemy
+import pandas as pd
+import plotly.express as px
+from flask import render_template
+
 
 app = Flask(__name__)
 app.secret_key = 'xcsdKJAH_Sd56$'
@@ -25,6 +34,7 @@ UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 arquivo_csv = 'vendas_grande.csv'
+db = SQLAlchemy()
 
 
 @app.route('/upload', methods=['GET','POST'])
@@ -52,24 +62,41 @@ def home():
 
     return render_template('index2.html')
 
-@app.route('/logout')
+@app.route('/logout', methods=['POST'])
 def logout():
-    #dicionário em python (pop=> remove do dict)
-    session.pop('login_user', None)
+    session.pop('loginUser', None)  # Remove o loginUser da sessão
+    session.pop('tipoUser', None)
+    return jsonify({"message": "Logout bem-sucedido!"}), 200
 
-    return make_response(render_template('index2.html'))
 
-@app.route('/fazer_login', methods=['POST'])
-def fazer_login():
-    login = request.form.get('login')
-    senha = request.form.get('senha')
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    usuario = Usuario.query.filter_by(loginUser=data['loginUser']).first()
+    if usuario and usuario.senha == data['senha']:
+        session['loginUser'] = usuario.loginUser
+        session['tipoUser'] = usuario.tipoUser
+        return jsonify({"message": "Login bem-sucedido!"}), 200
+    return jsonify({"message": "Credenciais inválidas"}), 401
 
-    if dao.verificarlogin(login, senha, dao.conectardb()):
-        session['login_user'] = login
-        return render_template('home2.html', user=login)
-    else:
-        msg = 'Login ou senha incorretos'
-        return render_template('index2.html', texto=msg)
+
+def verificar_login():
+    if 'loginUser' not in session:
+        return jsonify({"message": "Usuário não autenticado"}), 401
+    return None
+
+@app.route('/produtos', methods=['POST'])
+def inserir_produto():
+    auth_check = verificar_login()
+    if auth_check:
+        return auth_check  # Se não estiver logado, retorna erro de não autenticado
+
+    data = request.get_json()
+    produto = Produto(nome=data['nome'], loginUser=session['loginUser'], qtde=data['qtde'], preco=data['preco'])
+    db.session.add(produto)
+    db.session.commit()
+    return jsonify({"message": "Produto inserido com sucesso!"}), 201
+
 
 @app.route('/atualizardados', methods=['POST'])
 def atualizar():
@@ -99,13 +126,30 @@ def exibirPagCadastro():
 
         return render_template('index2.html', msg='Login necessário')
 
-@app.route('/listarprodutos')
-def listar_prods():
-    if 'login_user' in session:
-        lista = ['melao','pera','uva','morango','café'] #pega do BD
-        return render_template('listarprods.html', lista=lista)
-    else:
-        return render_template('index2.html', msg='Login necessário')
+@app.route('/produtos', methods=['GET'])
+def listar_produtos():
+    # Verifica se o usuário está logado
+    auth_check = verificar_login()
+    if auth_check:
+        return auth_check  # Retorna erro se o usuário não estiver autenticado
+
+    # Consulta todos os produtos no banco de dados
+    produtos = Produto.query.all()
+
+    # Formata os produtos em JSON
+    produtos_json = [
+        {
+            "id": produto.id,
+            "nome": produto.nome,
+            "loginUser": produto.loginUser,
+            "qtde": produto.qtde,
+            "preco": produto.preco,
+        }
+        for produto in produtos
+    ]
+
+    return jsonify(produtos_json), 200
+
 
 @app.route('/exibirPagComentario')
 def exibirPagComent():
