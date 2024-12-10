@@ -150,6 +150,40 @@ def listar_produtos():
 
     return jsonify(produtos_json), 200
 
+@app.route('/visualizacao', methods=['GET'])
+def visualizar_vendas():
+    auth_check = verificar_login()
+    if auth_check:
+        return auth_check  # Retorna erro se o usuário não estiver autenticado
+
+    # Parâmetro opcional para filtro
+    nome_produto = request.args.get('nomeProduto', None)
+
+    # Consulta dados do banco de dados
+    query = db.session.query(Produto.nome, Produto.qtde, Produto.preco)
+    if nome_produto:
+        query = query.filter(Produto.nome.ilike(f"%{nome_produto}%"))
+
+    vendas = query.all()
+
+    # Converte para DataFrame do pandas
+    df = pd.DataFrame(vendas, columns=["Produto", "Quantidade", "Preço"])
+    if df.empty:
+        return "<h3>Nenhum dado encontrado para visualização.</h3>"
+
+    # Gera gráfico com Plotly
+    fig = px.bar(
+        df,
+        x="Produto",
+        y="Quantidade",
+        color="Preço",
+        title="Vendas por Produto"
+    )
+
+    # Renderiza o gráfico em HTML
+    return render_template("grafico.html", grafico=fig.to_html(full_html=False))
+
+
 
 @app.route('/exibirPagComentario')
 def exibirPagComent():
