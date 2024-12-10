@@ -13,7 +13,6 @@ import plotly.express as px
 from flask import render_template
 from functools import wraps
 
-
 app = Flask(__name__)
 app.secret_key = 'xcsdKJAH_Sd56$'
 
@@ -151,7 +150,6 @@ def buscar_produto():
 
     return jsonify({"message": "Parâmetros inválidos"}), 400
 
-
 @app.route('/atualizardados', methods=['POST'])
 def atualizar():
     atual.atualizarcustoso('teste')
@@ -253,7 +251,6 @@ def get_usuario(login):
         abort(404, description="Tarefa não encontrada")
     return jsonify(user), 200
 
-
 #---------- autenticaçao com jwt------------------------
 
 @app.route('/login/externo', methods=['POST'])
@@ -270,7 +267,6 @@ def login_externo():
         #ou
         #return jsonify({"message": "Usuário ou senha inválidos"}), 401
 
-
 @app.route('/protegido/obter/<string:login>', methods=['GET'])
 @jwt_required()
 def get_usuario_protegido(login):
@@ -281,7 +277,6 @@ def get_usuario_protegido(login):
         abort(404, description="usuário não encontrado")
     return jsonify(user), 200
 
-
 @app.route('/protegido/listarusuarios/externo', methods=['GET'])
 @jwt_required()
 def listar_usuarios_externo():
@@ -289,15 +284,12 @@ def listar_usuarios_externo():
     print(usuario_logado)
     return jsonify(dao.listarpessoas(1)), 200
 
-
-
 if __name__ == '__main__':
     app.run(debug=True)
 
     #certificado = os.path.join('ssl', 'certificado.pem')
     #chave = os.path.join('ssl', 'chave.pem')
     #app.run(ssl_context=(certificado, chave), debug=True )
-
 
 '''
 instalei 
